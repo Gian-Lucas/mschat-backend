@@ -1,4 +1,6 @@
 const express = require("express");
+const mongoose = require("./database/index");
+const Message = require("./models/message");
 const cors = require("cors");
 const app = express();
 
@@ -16,37 +18,78 @@ const io = new Server(server, {
 
 const users = [];
 
-// quando user conectar
+async function getMessagesOfRoom(roomCode) {
+  try {
+    const messages = await Message.find({ roomCode });
+
+    console.log(messages);
+
+    return messages;
+  } catch (error) {
+    console.log(error);
+    return [];
+  }
+}
+
+async function saveNewMessage(msg) {
+  try {
+    const { roomCode, user, text } = msg;
+
+    const newMessage = new Message({
+      roomCode,
+      user,
+      text,
+    });
+
+    const addMessage = await newMessage.save();
+
+    console.log(addMessage);
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+function removeUser(socketId) {
+  for (let i = 0; i < users.length; i++) {
+    if (users[i] === socketId) {
+      users.splice(i, 1);
+    }
+  }
+  console.log(`user ${socketId} disconnected`);
+  console.log(users);
+}
+
+// when user connect
 io.on("connection", (socket) => {
   console.log(`user ${socket.id} connected`);
 
   users.push(socket.id);
   console.log(users);
 
-  // quando user enviar uma msg
-  socket.on("send_message", (msg) => {
+  // when user send a message
+  socket.on("send_message", async (msg) => {
     console.log(msg);
 
-    io.emit("receive_message", {
+    saveNewMessage(msg);
+
+    io.to(msg.roomCode).emit("receive_message", {
       user: msg.user,
       text: msg.text,
     });
   });
 
-  // quando user desconectar
-  socket.on("disconnect", () => {
-    removeUser();
+  // join in room
+  socket.on("join_room", async (code) => {
+    socket.join(code);
+    console.log("entrar na sala: ", code);
+
+    io.to(code).emit("room_messages", await getMessagesOfRoom(code));
   });
 
-  function removeUser() {
-    for (let i = 0; i < users.length; i++) {
-      if (users[i] === socket.id) {
-        users.splice(i, 1);
-      }
-    }
-    console.log(`user ${socket.id} disconnected`);
-    console.log(users);
-  }
+  // when user disconnect
+  socket.on("disconnect", () => {
+    removeUser(socket.id);
+  });
 });
 
 server.listen(process.env.PORT || 8080, () => {
